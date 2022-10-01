@@ -2,11 +2,17 @@
 
 pragma solidity ^0.8.4;
 
+/**
+ * Blind auction allows bidding within an allotted time.
+ * Bids can be faked to gain advantage over others.
+ */
 contract BlindAuction {
     address payable public beneficiary;
     address public highestBidder;
     uint256 public highestBid;
+    // time period for the bids
     uint256 public biddingEnd;
+    // time bids can be revealed
     uint256 public revealEnd;
     bool public ended;
 
