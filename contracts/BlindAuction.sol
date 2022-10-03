@@ -52,7 +52,7 @@ contract BlindAuction {
     ) {
         beneficiary = beneficiaryAddress;
         biddingEnd = block.timestamp + biddingTime;
-        revealEnd = revealTime;
+        revealEnd = biddingEnd + revealTime;
     }
 
     function placeBid(address bidder, uint256 value)
