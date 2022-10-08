@@ -25,6 +25,9 @@ contract BlindAuction {
     mapping(address => Bid[]) public bids;
 
     event AuctionEnded(address winner, uint256 highestBid);
+    event Refund(address recipient, uint256 refund);
+    event BidIndex(uint256 index);
+    event Withdraw(uint256 amount);
 
     /// Called too early. Try later at `time`.
     error TooEarly(uint256 time);
@@ -45,6 +48,12 @@ contract BlindAuction {
         _;
     }
 
+    /**
+     * Initialize the smart contract
+     * @param biddingTime period in seconds
+     * @param revealTime period in seconds after the bidding ended
+     * @param beneficiaryAddress receives the highest bid after the bidding ends.
+     */
     constructor(
         uint256 biddingTime,
         uint256 revealTime,
@@ -60,13 +69,22 @@ contract BlindAuction {
         returns (bool success)
     {
         if (value <= highestBid) return false;
+        // first time, highestBidder is initialized by default to 0 address
         if (highestBidder != address(0))
-            // Refund the previously highest bidder.
+            // accumulate previous highest bid by same bidder
             pendingReturns[highestBidder] += highestBid;
 
         highestBid = value;
         highestBidder = bidder;
         return true;
+    }
+
+    function createBlindedBid(
+        uint256 value,
+        bool fake,
+        bytes32 secret
+    ) external pure returns (bytes32) {
+        return keccak256(abi.encodePacked(value, fake, secret));
     }
 
     /**
@@ -82,11 +100,15 @@ contract BlindAuction {
         bids[msg.sender].push(
             Bid({blindedBid: blindedBid, deposit: msg.value})
         );
+        emit BidIndex(bids[msg.sender].length - 1);
     }
 
     /**
      * Reveal your bids. You will get a refund for all correctly blinded
      * invalid bids and for all bids except for the totally highest.
+     * @param values list of bid amount in the same order when bid was added.
+     * @param fakes list of flags in the same order indicating the real or fake bids when bid was added.
+     * @param secrets list of secrets attached in the same order when the bid was added.
      */
     function reveal(
         uint256[] calldata values,
@@ -110,6 +132,7 @@ contract BlindAuction {
                 secrets[i]
             );
 
+            // verify the hash and skip invalid bid hash
             if (
                 bidToCheck.blindedBid !=
                 keccak256(abi.encodePacked(value, fake, secret))
@@ -119,15 +142,18 @@ contract BlindAuction {
                 continue;
             }
 
+            // from here the bid is valid so add up refunds
             refund += bidToCheck.deposit;
 
             if (!fake && bidToCheck.deposit >= value) {
+                // place real bid and deduct from accumulated refund
                 if (placeBid(msg.sender, value)) refund -= value;
             }
             // Make it impossible for the sender to re-claim the same deposit.
             bidToCheck.blindedBid = bytes32(0);
         }
         payable(msg.sender).transfer(refund);
+        emit Refund(msg.sender, refund);
     }
 
     // Withdraw a bid that was overbid.
@@ -141,12 +167,14 @@ contract BlindAuction {
             pendingReturns[msg.sender] = 0;
             payable(msg.sender).transfer(amount);
         }
+        emit Withdraw(amount);
     }
 
     // End the auction and send the highest bid to the beneficiary.
     function auctionEnd() external onlyAfter(revealEnd) {
         if (ended) revert AuctionEndAlreadyCalled();
         emit AuctionEnded(highestBidder, highestBid);
+        // end early to avoid re-entrancy
         ended = true;
 
         beneficiary.transfer(highestBid);
